@@ -1,0 +1,72 @@
+
+ 
+
+ &SETUP
+   miter=1,niter(1)=1,niter(2)=75,niter(3)=50,niter(4)=100, niter(5)=100,
+   write_diag(1)=.true.,write_diag(2)=.false.,write_diag(3)=.true.,
+   gencode=78,qoption=2, lread_obs_save=.false.,
+   factqmin=0.0,factqmax=0.0,deltim=1200,
+   ntilt_radarfiles=1,iguess=-1, !nmin_assimilation=,
+   oneobtest=.false.,retrieval=.false.,
+   nhr_assimilation=3,l_foto=.false.,offtime_data=.true.,
+   use_prepb_satwnd=.true.,
+   nhr_obsbin=5, !hardcoded for +/- 1 and 2 'minutes'
+   use_pbl=.false.,use_compress=.false.,nsig_ext=13,gpstop=30.,
+   static_gsi_nopcp_dbz=0,
+   missing_to_nopcp=.false.,  rmesh_dbz=4.0,rmesh_vr=4.0,
+   zmesh_dbz=1000.0,zmesh_vr=1000.0,if_model_dbz=.true.,
+   radar_no_thinning=.true.,
+   bintype=7,if_staticB_3d=.true.,vordiv_cv=.false.,q_cv=.false.,uv_cv=.true.,
+   iseed=_SEED_, lh=_LH_, lv=_LV_, pert_dBZ_sd=_DBZSD_,hydro_noise=_HYDRO_,
+ /
+ &GRIDOPTS
+   JCAP=62,JCAP_B=62,NLAT=60,NLON=60,nsig=60,regional=.true.,
+   wrf_nmm_regional=.false.,wrf_mass_regional=.true.,
+   nems_nmmb_regional=.false.,diagnostic_reg=.false.,
+   filled_grid=.false.,half_grid=.true.,netcdf=.true.,
+   grid_ratio_wrfmass=1.0,
+ /
+ &BKGERR
+   vs=_VS_
+   hzscl=_HZSCL_
+   bw=0.,fstat=.false.,
+ /
+ &ANBKGERR
+ /
+ &JCOPTS
+ /
+ &STRONGOPTS
+ /
+ &OBSQC
+   dfact=0.75,dfact1=3.0,noiqc=.false.,c_varqc=0.02,vadfile='prepbufr',
+ /
+ &OBS_INPUT
+   dmesh(1)=120.0,dmesh(2)=60.0,dmesh(3)=30,time_window_max=1.5,
+ /
+OBS_INPUT::
+!  dfile          dtype       dplat     dsis                 dval    dthin dsfcalc
+   refl_vol      dbz         null        dbz                   1.0      0      0  0.09
+::
+   vr_vol         rw          null        rw                    1.0      0      0  0.09
+ &SUPEROB_RADAR
+   del_azimuth=5.,del_elev=.25,del_range=5000.,del_time=.5,elev_angle_max=5.,minnum=50,range_max=100000.,
+   l2superob_only=.false.,
+ /
+ &LAG_DATA
+ /
+ &HYBRID_ENSEMBLE
+   l_hyb_ens=.false.,n_ens=45,beta_s0=0.1,s_ens_h=4.10790,s_ens_v=-0.30125, generate_ens=.false.,uv_hyb_ens=.true.,q_hyb_ens=.false.,ANISO_A_EN=.false.,regional_ensemble_option=3
+ /
+ &RAPIDREFRESH_CLDSURF
+ /
+ &CHEM
+ /
+ &SINGLEOB_TEST
+   maginnov=1.0,magoberr=0.8,oneob_type='t',
+   oblat=38.,oblon=279.,obpres=500.,obdattim=,
+   obhourset=0.,
+ /
+ &NST
+ /
+
+

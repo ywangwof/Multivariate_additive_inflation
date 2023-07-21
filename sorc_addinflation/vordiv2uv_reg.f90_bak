@@ -1,0 +1,925 @@
+subroutine vordiv2uv_reg( vor, div,  u, v)
+!$$$  subprogram documentation block
+!                .      .    .                                       .
+! subprogram:    vordiv2uv_reg
+!
+! abstract:  Calculate wind components u and v from vor and div
+!            (vorticity and divergence, respectively)
+!
+!   input argument list:
+!     vor - vorticity
+!     div - divergence
+!
+!   output argument list:
+!     u - zonal wind component
+!     v - meridional wind component
+!
+! remarks:
+!    The method used is 
+!       vor = ( dv/dx - du/dy )
+!       div = ( du/dx + dv/dy )
+!
+!    The assumptions made in this routine are:
+!       - unstaggered grid,
+!       - lateral boundary conditions - du/dn, dv/dn = 0 (FCT)
+!       - dy=rearth*dph , dx=cos(ph)*rearth*dlm (dx,dy is rotated grid)
+!
+! attributes:
+!   language: f90
+!   machine:  ibm rs/6000 sp
+!
+!$$$ end documentation block
+
+  use kinds, only: r_kind,i_kind
+  use constants, only: half
+  use gridmod, only: coeffx,coeffy,nlat,nlon
+  
+  implicit none
+  
+  real(r_kind), intent(in   ) :: vor(nlat,nlon) ! Vorticity
+  real(r_kind), intent(in   ) :: div(nlat,nlon) ! Divergence
+  real(r_kind), intent(  out) :: u(nlat,nlon)   ! u wind comp (m/s)
+  real(r_kind), intent(  out) :: v(nlat,nlon)   ! v wind comp (m/s)
+
+  real(r_kind)                :: psi(nlat,nlon), chi(nlat,nlon), &
+                                 psi1(nlon,nlat), chi1(nlon,nlat)
+
+  real(r_kind)                :: vor1(nlon,nlat), div1(nlon,nlat)
+  
+  integer(i_kind)             :: i, j           ! Loop counters.
+
+  integer(i_kind), parameter  :: num_fft_factors = 10
+
+  real(r_kind), allocatable     :: trigs1(:)                 ! FFT trig functions.
+  real(r_kind), allocatable     :: trigs2(:)                 ! FFT trig functions.
+  real(r_kind), allocatable     :: fft_coeffs(:,:)           ! FFT coefficients.
+  real(r_kind), allocatable     :: trigs1s(:)                ! FFT trig functions.
+  real(r_kind), allocatable     :: trigs2s(:)                ! FFT trig functions.
+  real(r_kind), allocatable     :: fft_coeffss(:,:)          ! FFT coefficients.
+
+  integer(i_kind)               :: ifax1(1:num_fft_factors)  ! FFT factors.
+  integer(i_kind)               :: ifax2(1:num_fft_factors)  ! FFT factors.
+  integer(i_kind)               :: ifax1s(1:num_fft_factors) ! FFT factors.
+  integer(i_kind)               :: ifax2s(1:num_fft_factors) ! FFT factors.
+
+  integer(i_kind)               :: n1, n2, n1s, n2s
+  
+
+!------------------------------------------------------------------------------
+!  Del**2 psi = vor; Del**2 chi = div
+!  Solve above eqs. for psi and chi
+!------------------------------------------------------------------------------
+
+  call da_fft_initialize1( nlon, nlat, n1, n2, ifax1, ifax2 )
+  allocate( trigs1(1:3*n1) )
+  allocate( trigs2(1:3*n2) )
+  allocate( fft_coeffs(1:n1+1,1:n2+1) )
+  call da_fft_initialize2( n1, n2, ds, trigs1, trigs2, fft_coeffs )
+
+  !call da_fft_initialize1( nlon+1, nlat+1, n1s, n2s, ifax1s, ifax2s )
+  !allocate( trigs1s(1:3*n1s) )
+  !allocate( trigs2s(1:3*n2s) )
+  !allocate( fft_coeffss(1:n1s+1,1:n2s+1) )
+  !call da_fft_initialize2( n1s, n2s, ds, trigs1s, trigs2s, fft_coeffss ) 
+
+  div1 = reshape(div,(/nlon,nlat/),order=(/2,1/))
+  vor1 = reshape(vor,(/nlon,nlat/),order=(/2,1/))
+
+  call da_del2a_to_a( nlon, nlat, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                       fft_coeffs, div1, chi1 )
+  call da_del2a_to_a( nlon, nlat, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                       fft_coeffs, vor1, psi1 )
+
+  psi = reshape(psi1,(/nlat,nlon/),order=(/2,1/))
+  chi = reshape(chi1,(/nlat,nlon/),order=(/2,1/))
+
+!------------------------------------------------------------------------------
+!  [2.0] Compute u, v at interior points (2nd order central finite diffs):
+!------------------------------------------------------------------------------
+
+  do j = 2,nlon-1
+     do i = 2,nlat-1
+        u(i,j) = -( psi(i+1,j  ) - psi(i-1,j  ) )*coeffy(i,j) + &
+                  ( chi(i  ,j+1) - chi(i  ,j-1) )*coeffx(i,j)
+
+        v(i,j) =  ( psi(i  ,j+1) - psi(i  ,j-1) )*coeffx(i,j) + &
+                  ( chi(i+1,j  ) - chi(i-1,j  ) )*coeffy(i,j)
+     end do
+  end do
+     
+
+!------------------------------------------------------------------------------
+!  [3.0] Compute u, v at domain boundaries:
+!------------------------------------------------------------------------------
+
+!    [3.1] Western boundaries:
+
+  j = 1
+  do i = 2,nlat-1
+     u(i,j) = -( psi(i+1,j  ) - psi(i-1,j  ) )*coeffy(i,j) + &
+               ( chi(i  ,j+2) - chi(i  ,j  ) )*coeffx(i,j)
+     v(i,j) =  ( psi(i  ,j+2) - psi(i  ,j  ) )*coeffx(i,j) + &
+               ( chi(i+1,j  ) - chi(i-1,j  ) )*coeffy(i,j)
+  end do
+     
+!    [3.2] Eastern boundaries:
+
+  j = nlon
+  do i = 2,nlat-1
+     u(i,j) = -( psi(i+1,j  ) - psi(i-1,j  ) )*coeffy(i,j) + &
+               ( chi(i  ,j  ) - chi(i  ,j-2) )*coeffx(i,j)
+     v(i,j) =  ( psi(i  ,j  ) - psi(i  ,j-2) )*coeffx(i,j) + &
+               ( chi(i+1,j  ) - chi(i-1,j  ) )*coeffy(i,j)
+  end do
+     
+!    [3.3] Southern boundaries:
+
+  i = 1
+  do j = 2,nlon-1
+     u(i,j) = -( psi(i+2,j  ) - psi(i  ,j  ) )*coeffy(i,j) + &
+               ( chi(i  ,j+1) - chi(i  ,j-1) )*coeffx(i,j)
+ 
+     v(i,j) =  ( psi(i  ,j+1) - psi(i  ,j-1) )*coeffx(i,j) + &
+               ( chi(i+2,j  ) - chi(i  ,j  ) )*coeffy(i,j)
+           
+  end do
+     
+!    [3.4] Northern boundaries:
+
+  i = nlat
+  do j = 2,nlon-1
+     u(i,j) = -( psi(i  ,j  ) - psi(i-2,j  ) )*coeffy(i,j) + &
+               ( chi(i  ,j+1) - chi(i  ,j-1) )*coeffx(i,j)
+
+     v(i,j) =  ( psi(i  ,j+1) - psi(i  ,j-1) )*coeffx(i,j) + &
+               ( chi(i  ,j  ) - chi(i-2,j  ) )*coeffy(i,j)
+  end do
+     
+!------------------------------------------------------------------------------
+!    [4.0] Corner points (assume average of surrounding points - poor?):
+!------------------------------------------------------------------------------
+
+!    [4.1] Bottom-left point:
+
+  u(1,1) = half * ( u(2,1) + u(1,2) )
+  v(1,1) = half * ( v(2,1) + v(1,2) )
+  
+!    [4.2] Top-left point:
+
+  u(nlat,1) = half * ( u(nlat-1,1) + u(nlat,2) )
+  v(nlat,1) = half * ( v(nlat-1,1) + v(nlat,2) )
+     
+!    [4.3] Bottom-right point:
+
+  u(1,nlon) = half * ( u(2,nlon) + u(1,nlon-1) )
+  v(1,nlon) = half * ( v(2,nlon) + v(1,nlon-1) )
+     
+!    [4.4] Top-right point:
+
+  u(nlat,nlon) = half * ( u(nlat-1,nlon) + u(nlat,nlon-1) )
+  v(nlat,nlon) = half * ( v(nlat-1,nlon) + v(nlat,nlon-1) )
+     
+  
+end subroutine vordiv2uv_reg
+
+subroutine vordiv2uvt_reg( u, v,  vor, div)
+
+  use kinds, only: r_kind,i_kind
+  use constants, only: zero,half
+  use gridmod, only:  coeffx,coeffy,nlat,nlon
+  implicit none
+
+
+  real(r_kind),intent(inout) :: u(nlat,nlon)   ! u wind comp (m/s)
+  real(r_kind),intent(inout) :: v(nlat,nlon)   ! v wind comp (m/s)
+  real(r_kind),intent(inout) :: vor(nlat,nlon) ! Vorticity
+  real(r_kind),intent(inout) :: div(nlat,nlon) ! Divergence
+
+  integer(i_kind)           :: i, j           ! Loop counters.
+  real(r_kind)              :: coeffx_u       ! Multiplicative coefficient.
+  real(r_kind)              :: coeffy_u       ! Multiplicative coefficient.
+  real(r_kind)              :: coeffx_v       ! Multiplicative coefficient.
+  real(r_kind)              :: coeffy_v       ! Multiplicative coefficient.
+
+!------------------------------------------------------------------------------
+!  [1.0] Initialise:
+!------------------------------------------------------------------------------
+
+  psi=zero
+  chi=zero
+  vor=zero
+  div=zero
+
+!------------------------------------------------------------------------------
+!     [4.0] Corner points (assume average of surrounding points - poor?):
+!------------------------------------------------------------------------------
+
+!    [4.1] Bottom-left point:
+
+  u(2,1) = u(2,1) + half * u(1,1)
+  u(1,2) = u(1,2) + half * u(1,1)
+  v(2,1) = v(2,1) + half * v(1,1)
+  v(1,2) = v(1,2) + half * v(1,1)
+
+!    [4.2] Top-left point:
+
+  u(nlat-1,1) = u(nlat-1,1) + half * u(nlat,1)
+  u(nlat  ,2) = u(nlat  ,2) + half * u(nlat,1)
+  v(nlat-1,1) = v(nlat-1,1) + half * v(nlat,1)
+  v(nlat  ,2) = v(nlat  ,2) + half * v(nlat,1)
+
+!    [4.3] Bottom-right point:
+
+  u(2,nlon  ) = u(2,nlon  ) + half * u(1,nlon)
+  u(1,nlon-1) = u(1,nlon-1) + half * u(1,nlon)
+  v(2,nlon  ) = v(2,nlon  ) + half * v(1,nlon)
+  v(1,nlon-1) = v(1,nlon-1) + half * v(1,nlon)
+
+!    [4.4] Top-right point:
+
+  u(nlat-1,nlon  ) = u(nlat-1,nlon  ) + half * u(nlat,nlon)
+  u(nlat  ,nlon-1) = u(nlat  ,nlon-1) + half * u(nlat,nlon)
+  v(nlat-1,nlon  ) = v(nlat-1,nlon  ) + half * v(nlat,nlon)
+  v(nlat  ,nlon-1) = v(nlat  ,nlon-1) + half * v(nlat,nlon)
+
+!------------------------------------------------------------------------------
+! [3.0] Compute u, v at domain boundaries:
+!------------------------------------------------------------------------------
+
+
+!    [3.4] Northern boundaries:
+
+  do j = 2,nlon-1
+     coeffy_u = coeffy(nlat,j) * u(nlat,j)
+     coeffx_u = coeffx(nlat,j) * u(nlat,j)
+     coeffy_v = coeffy(nlat,j) * v(nlat,j)
+     coeffx_v = coeffx(nlat,j) * v(nlat,j)
+
+     psi(nlat  ,j+1) = psi(nlat  ,j+1) + coeffx_v
+     psi(nlat  ,j-1) = psi(nlat  ,j-1) - coeffx_v
+     chi(nlat  ,j  ) = chi(nlat  ,j  ) + coeffy_v
+     chi(nlat-2,j  ) = chi(nlat-2,j  ) - coeffy_v
+
+     psi(nlat  ,j  ) = psi(nlat  ,j  ) - coeffy_u
+     psi(nlat-2,j  ) = psi(nlat-2,j  ) + coeffy_u
+     chi(nlat  ,j+1) = chi(nlat  ,j+1) + coeffx_u
+     chi(nlat  ,j-1) = chi(nlat  ,j-1) - coeffx_u
+  end do
+
+!    [3.3] Southern boundaries:
+
+
+  do j = 2,nlon-1
+     coeffy_u = coeffy(1,j) * u(1,j)
+     coeffx_u = coeffx(1,j) * u(1,j)
+     coeffy_v = coeffy(1,j) * v(1,j)
+     coeffx_v = coeffx(1,j) * v(1,j)
+
+     psi(1,j+1) = psi(1,j+1) + coeffx_v
+     psi(1,j-1) = psi(1,j-1) - coeffx_v
+     chi(3,j  ) = chi(3,j  ) + coeffy_v
+     chi(1,j  ) = chi(1,j  ) - coeffy_v
+
+     psi(3,j  ) = psi(3,j  ) - coeffy_u
+     psi(1,j  ) = psi(1,j  ) + coeffy_u
+     chi(1,j+1) = chi(1,j+1) + coeffx_u
+     chi(1,j-1) = chi(1,j-1) - coeffx_u
+
+  end do
+
+!    [3.2] Eastern boundaries:
+  do i = 2,nlat-1
+     coeffy_u = coeffy(i,nlon) * u(i,nlon)
+     coeffx_u = coeffx(i,nlon) * u(i,nlon)
+     coeffy_v = coeffy(i,nlon) * v(i,nlon)
+     coeffx_v = coeffx(i,nlon) * v(i,nlon)
+
+     psi(i  ,nlon  ) = psi(i  ,nlon  ) + coeffx_v
+     psi(i  ,nlon-2) = psi(i  ,nlon-2) - coeffx_v
+     chi(i+1,nlon  ) = chi(i+1,nlon  ) + coeffy_v
+     chi(i-1,nlon  ) = chi(i-1,nlon  ) - coeffy_v
+
+     psi(i+1,nlon  ) = psi(i+1,nlon  ) - coeffy_u
+     psi(i-1,nlon  ) = psi(i-1,nlon  ) + coeffy_u
+     chi(i  ,nlon  ) = chi(i  ,nlon  ) + coeffx_u
+     chi(i  ,nlon-2) = chi(i  ,nlon-2) - coeffx_u
+
+  end do
+
+!    [3.1] Western boundaries:
+
+  do i = 2,nlat-1
+     coeffy_u = coeffy(i,1) * u(i,1)
+     coeffx_u = coeffx(i,1) * u(i,1)
+     coeffy_v = coeffy(i,1) * v(i,1)
+     coeffx_v = coeffx(i,1) * v(i,1)
+
+     psi(i  ,3) = psi(i  ,3) + coeffx_v
+     psi(i  ,1) = psi(i  ,1) - coeffx_v
+     chi(i+1,1) = chi(i+1,1) + coeffy_v
+     chi(i-1,1) = chi(i-1,1) - coeffy_v
+
+     psi(i+1,1) = psi(i+1,1) - coeffy_u
+     psi(i-1,1) = psi(i-1,1) + coeffy_u
+     chi(i  ,3) = chi(i  ,3) + coeffx_u
+     chi(i  ,1) = chi(i  ,1) - coeffx_u
+
+  end do
+
+!------------------------------------------------------------------------------
+!  [2.0] Compute u, v at interior points (2nd order central finite diffs):
+!------------------------------------------------------------------------------
+  do j = 2,nlon-1
+     do i = 2,nlat-1
+        coeffy_u = coeffy(i,j) * u(i,j)
+        coeffx_u = coeffx(i,j) * u(i,j)
+        coeffy_v = coeffy(i,j) * v(i,j)
+        coeffx_v = coeffx(i,j) * v(i,j)
+
+        psi(i+1,j  ) = psi(i+1,j   ) - coeffy_u
+        psi(i-1,j  ) = psi(i-1,j   ) + coeffy_u
+        chi(i  ,j+1) = chi(i  ,j+1) + coeffx_u
+        chi(i  ,j-1) = chi(i  ,j-1) - coeffx_u
+
+        psi(i  ,j+1) = psi(i  ,j+1) + coeffx_v
+        psi(i  ,j-1) = psi(i  ,j-1) - coeffx_v
+        chi(i+1,j  ) = chi(i+1,j  ) + coeffy_v
+        chi(i-1,j  ) = chi(i-1,j  ) - coeffy_v
+
+     end do
+  end do
+
+!------------------------------------------------------------------------------
+!  Del**2 psi = vor; Del**2 chi = div
+!  Solve above eqs. for psi and chi
+!------------------------------------------------------------------------------
+
+  call da_fft_initialize1( nlon, nlat, n1, n2, ifax1, ifax2 )
+  allocate( trigs1(1:3*n1) )
+  allocate( trigs2(1:3*n2) )
+  allocate( fft_coeffs(1:n1+1,1:n2+1) )
+  call da_fft_initialize2( n1, n2, ds, trigs1, trigs2, fft_coeffs )
+
+  !call da_fft_initialize1( nlon+1, nlat+1, n1s, n2s, ifax1s, ifax2s )
+  !allocate( trigs1s(1:3*n1s) )
+  !allocate( trigs2s(1:3*n2s) )
+  !allocate( fft_coeffss(1:n1s+1,1:n2s+1) )
+  !call da_fft_initialize2( n1s, n2s, ds, trigs1s, trigs2s, fft_coeffss )
+
+  chi1 = reshape(chi,(/nlon,nlat/),order=(/2,1/))
+  psi1 = reshape(psi,(/nlon,nlat/),order=(/2,1/))
+
+  call da_del2a_to_a_ad( nlon, nlat, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                         fft_coeffs, div1, chi1 )
+  call da_del2a_to_a_ad( nlon, nlat, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                         fft_coeffs, vor1, psi1 )
+
+  div = reshape(div1,(/nlat,nlon/),order=(/2,1/))
+  vor = reshape(vor1,(/nlat,nlon/),order=(/2,1/))
+
+end subroutine vordiv2uvt_reg
+
+subroutine da_del2a_to_a( dim1, dim2, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                          fft_coeffs, del2a, a )
+
+   implicit none
+
+   integer, intent(in):: dim1, dim2                   ! Dimensions.
+   integer, intent(in):: n1, n2                       ! Padded dimensions (n=dim-1+pad).
+   integer, intent(in):: ifax1(1:num_fft_factors)     ! FFT factors.
+   integer, intent(in):: ifax2(1:num_fft_factors)     ! FFT factors.
+   real, intent(in)   :: trigs1(1:3*n1)               ! FFT trig functions.
+   real, intent(in)   :: trigs2(1:3*n2)               ! FFT trig functions.
+   real, intent(in)   :: fft_coeffs(1:n1+1,1:n2+1)    ! FFT coefficients.
+   real, intent(in)   :: del2a(1:dim1,1:dim2)         ! Del**2 a.
+   real, intent(out)  :: a(1:dim1,1:dim2)             ! Field a.
+
+   integer            :: fft_method                   ! 1=Cosine, 2=Sine transform.
+   integer            :: i, j                         ! Loop counters.
+   integer            :: ij                           ! 1D array counter.
+   integer            :: isign                        ! -1=Grid>spec, 1=Spec>Grid.
+   integer            :: inc                          ! Stride between data points.
+   integer            :: jump                         ! Increment between start of data vectors.
+   integer            :: lot                          ! Number of data vectors.
+   integer            :: n                            ! n+1 is the length of the data.
+   integer            :: work_area                    ! Dimension of workspace.
+   real               :: a2d(1:n1+1,1:n2+1)           ! 2D data array.
+   real               :: a1d(1:(n1+1)*(n2+1))         ! 1D data array.
+
+   work_area = ( n1 + 1 ) * ( n2 + 1 )
+   fft_method = 2
+
+!  Fill 2D array structure
+   do j = 1, dim2
+      do i = 1, dim1
+         a2d(i,j) = del2a(i,j)
+      end do
+
+!     Fill pad zone (and force b.c.s to satisfy solution type):
+      if ( fft_method == 1 ) then ! Cosine transform.
+         a2d(1,j) = a2d(2,j)
+         do i = dim1, n1+1
+            a2d(i,j) = a2d(dim1-1,j)
+         end do
+      else if ( fft_method == 2 ) then ! Sine transform:
+         a2d(1,j) = 0.0
+
+         do i = dim1, n1+1
+            a2d(i,j) = 0.0
+         end do
+      end if
+   end do
+
+   if ( fft_method == 1 ) then ! Cosine transform.
+      do i = 1, n1+1
+         a2d(i,1) = a2d(i,2)
+         do j = dim2, n2+1
+            a2d(i,j) = a2d(i,dim2-1)
+         end do
+      end do
+   else if ( fft_method == 2 ) then ! Sine transform:
+      do i = 1, n1+1
+         a2d(i,1) = 0.0
+         do j = dim2, n2+1
+            a2d(i,j) = 0.0
+         end do
+      end do
+   end if
+
+!  Transfer to data array:
+   do j = 1, n2+1
+      do i = 1, n1+1
+         ij = (j-1) * (n1+1) + i
+         a1d(ij) = a2d(i,j)
+      end do
+   end do
+
+!------------------------------------------------------------------------------
+!     Perform double fast sine/cosine transform to get spectral del2a:
+!------------------------------------------------------------------------------
+
+   isign = -1 ! Grid to spectral
+!  1st dimension:
+   inc = 1    ! Stride between data points.
+   jump = n1+1! Increment between start of data vectors.
+   lot = n2+1 ! Number of data vectors.
+   n = n1     ! n+1 is the length of the data.
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax1, trigs1, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax1, trigs1, a1d, work_area )
+   end if
+
+!  2nd dimension:
+   inc = n1+1 ! Stride between data points.
+   jump = 1   ! Increment between start of data vectors.
+   lot = n1+1 ! Number of data vectors.
+   n = n2     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax2, trigs2, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax2, trigs2, a1d, work_area )
+   end if
+
+!------------------------------------------------------------------------------
+!  Perform conversion from del2a to a in spectral space:
+!------------------------------------------------------------------------------
+
+!  Note fft_coeffs(1,1)=0 so a(k=0,l=0) is also 0.
+   do j = 1, n2+1
+      do i = 1, n1+1
+         ij = (j-1) * (n1+1) + i
+         a1d(ij) = fft_coeffs(i,j) * a1d(ij)
+      end do
+   end do
+
+!------------------------------------------------------------------------------
+!  Perform double fast sine/cosine transform to get gridpoint a:
+!------------------------------------------------------------------------------
+
+   isign = 1 ! Spectral to grid.
+
+!  1st dimension:
+   inc = 1    ! Stride between data points.
+   jump = n1+1! Increment between start of data vectors.
+   lot = n2+1 ! Number of data vectors.
+   n = n1     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax1, trigs1, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax1, trigs1, a1d, work_area )
+   end if
+
+!  2nd dimension:
+   inc = n1+1 ! Stride between data points.
+   jump = 1   ! Increment between start of data vectors.
+   lot = n1+1 ! Number of data vectors.
+   n = n2     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax2, trigs2, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax2, trigs2, a1d, work_area )
+   end if
+
+!  Transfer grid-point chi to 2D-array (throwing away pad):
+   do j = 1, dim2
+      do i = 1, dim1
+         ij = (j-1) * (n1+1) + i
+         a(i,j) = a1d(ij)
+      end do
+   end do
+
+end subroutine da_del2a_to_a
+
+subroutine da_del2a_to_a_ad( dim1, dim2, n1, n2, ifax1, ifax2, trigs1, trigs2, &
+                             fft_coeffs, del2a, a )
+
+   implicit none
+
+   integer, intent(in):: dim1, dim2                   ! Dimensions.
+   integer, intent(in):: n1, n2                       ! Padded dimensions (n=dim-1+pad).
+   integer, intent(in):: ifax1(1:num_fft_factors)     ! FFT factors.
+   integer, intent(in):: ifax2(1:num_fft_factors)     ! FFT factors.
+   real, intent(in)   :: trigs1(1:3*n1)               ! FFT trig functions.
+   real, intent(in)   :: trigs2(1:3*n2)               ! FFT trig functions.
+   real, intent(in)   :: fft_coeffs(1:n1+1,1:n2+1)    ! FFT coefficients.
+   real, intent(in)   :: a(1:dim1,1:dim2)             ! Field a.
+   real, intent(out)  :: del2a(1:dim1,1:dim2)         ! Del**2 a.
+
+   integer            :: fft_method                   ! 1=Cosine, 2=Sine transform.
+   integer            :: i, j                         ! Loop counters.
+   integer            :: ij                           ! 1D array counter.
+   integer            :: isign                        ! -1=Grid>spec, 1=Spec>Grid.
+   integer            :: inc                          ! Stride between data points.
+   integer            :: jump                         ! Increment between start of data vectors.
+   integer            :: lot                          ! Number of data vectors.
+   integer            :: n                            ! n+1 is the length of the data.
+   integer            :: work_area                    ! Dimension of workspace.
+   real               :: a2d(1:n1+1,1:n2+1)           ! 2D data array.
+   real               :: a1d(1:(n1+1)*(n2+1))         ! 1D data array.
+   real               :: fft_adjoint_factor           ! FFT Adjoint factor
+
+   fft_adjoint_factor = 4.0 / real(n1 * n2)
+
+   work_area = ( n1 + 1 ) * ( n2 + 1 )
+   fft_method = 2
+
+!  Fill 2D array structure
+   do j = 1, dim2
+      do i = 1, dim1
+         a2d(i,j) = a(i,j)
+      end do
+
+!     Fill pad zone (and force b.c.s to satisfy solution type):
+      if ( fft_method == 1 ) then ! Cosine transform.
+         a2d(1,j) = a2d(2,j)
+         do i = dim1, n1+1
+            a2d(i,j) = a2d(dim1-1,j)
+         end do
+      else if ( fft_method == 2 ) then ! Sine transform:
+         a2d(1,j) = 0.0
+
+         do i = dim1, n1+1
+            a2d(i,j) = 0.0
+         end do
+      end if
+   end do
+
+   if ( fft_method == 1 ) then ! Cosine transform.
+      do i = 1, n1+1
+         a2d(i,1) = a2d(i,2)
+         do j = dim2, n2+1
+            a2d(i,j) = a2d(i,dim2-1)
+         end do
+      end do
+   else if ( fft_method == 2 ) then ! Sine transform:
+      do i = 1, n1+1
+         a2d(i,1) = 0.0
+         do j = dim2, n2+1
+            a2d(i,j) = 0.0
+         end do
+      end do
+   end if
+
+!  Transfer to data array:
+   do j = 1, n2+1
+      do i = 1, n1+1
+         ij = (j-1) * (n1+1) + i
+         a1d(ij) = a2d(i,j)
+      end do
+   end do
+
+!------------------------------------------------------------------------------
+!     Perform double fast sine/cosine transform to get spectral del2a:
+!------------------------------------------------------------------------------
+                           
+   isign = -1 ! Grid to spectral
+!  1st dimension:
+   inc = 1    ! Stride between data points.
+   jump = n1+1! Increment between start of data vectors.
+   lot = n2+1 ! Number of data vectors.
+   n = n1     ! n+1 is the length of the data.
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax1, trigs1, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax1, trigs1, a1d, work_area )
+   end if
+
+!  2nd dimension:
+   inc = n1+1 ! Stride between data points.
+   jump = 1   ! Increment between start of data vectors.
+   lot = n1+1 ! Number of data vectors.
+   n = n2     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax2, trigs2, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax2, trigs2, a1d, work_area )
+   end if
+
+!------------------------------------------------------------------------------
+!  Perform conversion from del2a to a in spectral space:
+!------------------------------------------------------------------------------
+
+!  Note fft_coeffs(1,1)=0 so a(k=0,l=0) is also 0.
+   do j = 1, n2+1
+      do i = 1, n1+1
+         ij = (j-1) * (n1+1) + i
+         a1d(ij) = fft_coeffs(i,j) * a1d(ij) / fft_adjoint_factor
+      end do
+   end do
+
+!------------------------------------------------------------------------------
+!  Perform double fast sine/cosine transform to get gridpoint a:
+!------------------------------------------------------------------------------
+ 
+   isign = 1 ! Spectral to grid.
+
+!  1st dimension:
+   inc = 1    ! Stride between data points.
+   jump = n1+1! Increment between start of data vectors.
+   lot = n2+1 ! Number of data vectors.
+   n = n1     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax1, trigs1, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax1, trigs1, a1d, work_area )
+   end if
+
+!  2nd dimension:
+   inc = n1+1 ! Stride between data points.
+   jump = 1   ! Increment between start of data vectors.
+   lot = n1+1 ! Number of data vectors.
+   n = n2     ! n+1 is the length of the data.
+
+   if ( fft_method == 1 ) then
+      call fft551( isign, inc, jump, lot, n, &
+                                     ifax2, trigs2, a1d, work_area )
+   else if ( fft_method == 2 ) then
+      call fft661( isign, inc, jump, lot, n, &
+                                   ifax2, trigs2, a1d, work_area )
+   end if
+
+!  Transfer grid-point chi to 2D-array (throwing away pad):
+   do j = 1, dim2
+      do i = 1, dim1
+         ij = (j-1) * (n1+1) + i
+         a(i,j) = a1d(ij)*fft_adjoint_factor
+      end do
+   end do
+
+end subroutine da_del2a_to_a_ad
+
+subroutine da_fft_initialize1( dim1, dim2, n1, n2, ifax1, ifax2 )
+
+   implicit none
+
+   real, parameter    :: pi = 3.1415926
+   integer, parameter :: num_fft_factors = 10
+
+   integer, intent(in):: dim1, dim2                   ! Dimensions.
+   integer, intent(out):: n1, n2                       ! Padded dimensions (n=dim-1+pad).
+   integer, intent(out):: ifax1(1:num_fft_factors)     ! FFT factors.
+   integer, intent(out):: ifax2(1:num_fft_factors)     ! FFT factors.
+
+   integer, parameter    :: nrange = 50               ! Range to search for efficient FFT.
+   integer            :: n                            ! n+1 is the length of the data.
+   integer            :: fft_pad1, fft_pad2           ! Range to search for efficient FFT.
+   logical            :: found_magic                  ! True if 2**p 3**p 5**r dimension found..
+
+   integer            :: fft_factors(1:num_fft_factors)! FFT factors.
+
+
+!  Ensure efficient FFT dimensions by padding if necessary:
+   n1 = dim1 - 1
+   do n = n1, n1 + nrange
+      call da_find_fft_factors( n, found_magic, fft_factors )
+      if ( found_magic .and. mod(n,2) == 0 ) then ! Even magic number found.
+         fft_pad1 = n - n1
+         ifax1 = fft_factors
+         exit
+      end if
+   end do
+   n1 = n1 + fft_pad1
+
+   n2 = dim2 - 1
+   do n = n2, n2 + nrange
+      call da_find_fft_factors( n, found_magic, fft_factors )
+      if ( found_magic .and. mod(n,2) == 0 ) then ! Even magic number found.
+         fft_pad2 = n - n2
+         ifax2 = fft_factors
+         exit
+      end if
+   end do
+   n2 = n2 + fft_pad2
+
+end subroutine da_fft_initialize1
+
+subroutine da_fft_initialize2( n1, n2, ds, trigs1, trigs2, fft_coeffs )
+
+!  Need to split fft_initialize as array dimensions need to be calculated first.
+
+   implicit none
+
+   real, parameter    :: pi = 3.1415926
+   integer, parameter :: num_fft_factors = 10
+
+   integer, intent(in):: n1, n2                       ! Padded dimensions (n=dim-1+pad).
+   real, intent(in)   :: ds                           ! Grid resolution.
+   real, intent(out)  :: trigs1(1:3*n1)               ! FFT trig functions.
+   real, intent(out)  :: trigs2(1:3*n2)               ! FFT trig functions.
+   real, intent(out)  :: fft_coeffs(1:n1+1,1:n2+1)    ! FFT coefficients.
+
+   integer            :: i, j                         ! Loop counters.
+   real               :: const                        ! Multiplicative constant.
+   real               :: coeff_nx                     ! Multiplicative constant.
+   real               :: coeff_ny                     ! Multiplicative constant.
+   real               :: cos_coeff_nx                 ! Multiplicative constant.
+   real               :: cos_coeff_ny                 ! Multiplicative constant.
+
+   const = -0.5 * ds * ds
+   coeff_nx = pi / real(n1)
+   coeff_ny = pi / real(n2)
+
+!  Calculate spectral Del**2 coefficients for C-grid (all pts. except i=j=1):
+   fft_coeffs(1,1) = 0.0 ! Not used?
+   do j = 2, n2+1
+      cos_coeff_ny = cos(coeff_ny * real(j - 1))
+      do i = 1, n1+1
+         cos_coeff_nx = cos(coeff_nx * real(i - 1))
+         fft_coeffs(i,j) = const / ( 2.0 - cos_coeff_nx - cos_coeff_ny)
+      end do
+   end do
+   j = 1
+   cos_coeff_ny = cos(coeff_ny * real(j - 1))
+   do i = 2, n1+1
+      cos_coeff_nx = cos(coeff_nx * real(i - 1))
+      fft_coeffs(i,j) = const / ( 2.0 - cos_coeff_nx - cos_coeff_ny)
+   end do
+
+   call da_find_fft_trig_funcs( n1, trigs1 )
+   call da_find_fft_trig_funcs( n2, trigs2 )
+
+end subroutine da_fft_initialize2
+
+subroutine da_find_fft_factors(n, n_ok, fft_factors)
+
+   !---------------------------------------------------------------------------
+   ! Purpose: Calculates prime factors of input number.
+   !---------------------------------------------------------------------------
+
+   implicit none
+
+   integer, parameter :: num_fft_factors = 10
+   integer, intent(in)  :: n
+   logical, intent(out) :: n_ok
+   integer, intent(out) :: fft_factors(:)
+
+   integer :: i, k, l
+   integer :: nfax, nu, ifac
+   integer :: jfax(num_fft_factors)
+   integer :: lfax(7)
+
+   data lfax /6,8,5,4,3,2,1/
+
+   !---------------------------------------------------------------------------
+   ! [1.0] Find factors of vector size (8,6,5,4,3,2; only one 8 allowed):
+   !---------------------------------------------------------------------------
+
+   n_ok = .false.
+   fft_factors(:) = 0
+
+   ! look for sixes first, store factors in descending order
+   nu=n
+   ifac=6
+   k=0
+   l=1
+
+20 continue
+
+   if (mod(nu,ifac).ne.0) goto 30
+
+   ! 6 is a factor:
+   k=k+1
+   jfax(k)=ifac
+   if (ifac.ne.8) goto 25
+   if (k.eq.1) goto 25
+   jfax(1)=8
+   jfax(k)=6
+
+25 continue
+   nu=nu/ifac
+   if (nu.eq.1) goto 50
+   if (ifac.ne.8) goto 20
+
+30 continue
+   l=l+1
+   ifac=lfax(l)
+   if (ifac .gt. 1) goto 20
+
+   ! illegal factors:
+   ! write (unit=message(1),fmt='(a,i4,a)') 'n = ', n, ' contains illegal
+   ! factors.'
+   ! call da_warning(__file__,__line__,message(1:1))
+
+   goto 9
+
+   ! now reverse order of factors
+50 continue
+   nfax=k
+   fft_factors(1)=nfax
+   do i=1,nfax
+      fft_factors(nfax+2-i)=jfax(i)
+   end do
+
+   n_ok = .true.
+
+9  continue
+
+end subroutine da_find_fft_factors
+
+subroutine da_find_fft_trig_funcs(n, trig_functs)
+
+   !---------------------------------------------------------------------------
+   ! Purpose: Set up constants required for Fourier, sine and cosine transforms
+   !---------------------------------------------------------------------------
+
+   implicit none
+
+   integer, intent(in)  :: n
+   real,    intent(out) :: trig_functs(:)
+
+   integer :: k, nil, nhl
+   real    :: del, angle
+
+   !---------------------------------------------------------------------------
+   ! [1.0] Trig functions for real periodic transform:
+   !---------------------------------------------------------------------------
+
+   trig_functs(:) = 0.0
+
+   del=4.0*(pi/2.0)/float(n)
+   nil=0
+   nhl=(n/2)-1
+
+   do k=nil,nhl
+      angle=float(k)*del
+      trig_functs(2*k+1)=cos(angle)
+      trig_functs(2*k+2)=sin(angle)
+   end do
+
+   ! [1.1] extra trig functions for cosine transform:
+
+   del=0.5*del
+   do k=1,nhl
+      angle=float(k)*del
+      trig_functs(2*n+k)=sin(angle)
+   end do
+
+   ! [1.2] extra trig functions for shifted cosine transform:
+
+   del=0.5*del
+   do k=1,n
+      angle=float(k)*del
+      trig_functs(n+k)=sin(angle)
+   end do
+
+end subroutine da_find_fft_trig_funcs
