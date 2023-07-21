@@ -1,6 +1,6 @@
 This is the repository for the multivariate additive inflation approach using a convective-scale static BEC matrix.
 
-Ref: Wang, Y., & Wang, X. (2023). A multivariate additive inflation approach to improve storm-scale ensemble-based data assimilation and forecasts: Methodology and experiment with a tornadic supercell. Journal of Advances in Modeling Earth Systems, 15, e2022MS003307. https://doi.org/10.1029/2022MS003307
+Wang, Y., & Wang, X. (2023). A multivariate additive inflation approach to improve storm-scale ensemble-based data assimilation and forecasts: Methodology and experiment with a tornadic supercell. Journal of Advances in Modeling Earth Systems, 15, e2022MS003307. https://doi.org/10.1029/2022MS003307
 
 
 (1)The downloaded files shall include the following files/directories:
