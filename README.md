@@ -1,4 +1,6 @@
-This is the repository for the multivariate additive inflation approach using a convective-scale static BEC matrix.
+This is the repository for the multivariate additive inflation approach using a convective-scale static BEC matrix developed by the Multiscale data Assimilation and Predictability (MAP) lab, School of Meteorology, University of Oklahoma (OU).
+
+If you use this resource, please cite our paper. Questions or comments, please leave an issue ticket in the above or email: xuguang.wang@ou.edu
 
 Wang, Y., & Wang, X. (2023). A multivariate additive inflation approach to improve storm-scale ensemble-based data assimilation and forecasts: Methodology and experiment with a tornadic supercell. Journal of Advances in Modeling Earth Systems, 15, e2022MS003307. https://doi.org/10.1029/2022MS003307
 
