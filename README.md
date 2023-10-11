@@ -43,11 +43,14 @@ Wang, Y., & Wang, X. (2023). A multivariate additive inflation approach to impro
     In wrf_mask, the QRAIN field tells the weak and strong storm binning, so that we can assign the proper
     static error statistics to corresponding locations in the following step (c). The weak and strong
     storm binning is distinguished by the observed reflectivity with a threshold of 35 dBZ.
-
     Alternatively, masker_utility/mrms2wrfgrid.py can also be used to create mask file intead of the above.
-    Prepare the 3D obs file of dbzobs.nc and wrf model file of wrf_mask,
+    Prepare the 3D obs file of dbzobs.nc and the wrf model file of wrf_mask,
+    
+```
     python mrms2wrfgrid.py
-    The created mask file is mask.
+```    
+    
+  The created mask file is mask.
 
 (b) Run adderr_dbz.x [obtained by compiling sorc_pertdbz] to get wrf_pert using any wrfinput file and wrf_mask as the inputs.
     In wrf_pert, the QGRAUP field represents the perturbed reflectivity.
