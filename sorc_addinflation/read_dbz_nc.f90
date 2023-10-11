@@ -7,13 +7,9 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 !           observations in DART-like netcdf format.  
 !
 ! program history log:
-!   2016-02-14  Y. Wang, Johnson, X. Wang - modify read_radar.f90 to read MRMS dbz in netcdf format 
+!   2016-02-14  Johnson, Y. Wang, X. Wang - modify read_radar.f90 to read MRMS dbz in netcdf format 
 !                                           in collaboration with Carley, POC: xuguang.wang@ou.edu
-!   2016-09-23  Johnson, Y. Wang, X. Wang - assign observation dependent horizontal and
-!                                           vertical localization scales to
-!                                           observation arrays,
-!                                           POC: xuguang.wang@ou.edu
-!                               
+!   2019-04-24  Thomas Jones : Major redo of read-file portion, other clean ups                            
 !
 ! program history log:
 !           
@@ -36,7 +32,7 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 !  dlat - real - grid relative latitude of observation (grid units)
 !  dlon - real - grid relative longitude of observation (grid units)
 !  maxobs - int - max number of obs converted to no precip observations
-!  num_m2nopcp -int - number of missing obs 
+!  num_m2nopcp -int - number of missing obs
 !  num_missing - int - number of missing observations
 !  num_noise - int - number of rejected noise observations
 !  num_nopcp - int - number of noise obs converted to no precip observations
@@ -56,7 +52,7 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 !  this_staid - char - radar station id
 !  thistiltr - real- radar tilt angle (radians)
 !  timeb - real - obs time (analyis relative minutes)
-!  dbzQC - real - reflectivity observation 
+!  dbzQC - real - reflectivity observation
 !  dbz_err - real - observation error of reflectivity
 !  height - real - height of observation
 !  lon    - real - longitude of observation
@@ -70,20 +66,20 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 !$$$ end documentation block
 
   use kinds, only: r_kind,r_double,i_kind
-  use constants, only: zero,half,one,two,deg2rad,rearth,rad2deg, &
+  use constants, only: zero,izero,half,one,two,deg2rad,rearth,rad2deg, &
                        one_tenth,r1000,r60,r60inv,r100,r400,grav_equator, &
                        eccentricity,somigliana,grav_ratio,grav,semi_major_axis,flattening 
   use gridmod, only: regional,tll2xy,nsig,nlat,nlon
-  use obsmod, only: iadate,doradaroneob,oneoblat,oneoblon,oneobheight,oneobradid, &
+  use obsmod, only: iadatemn,doradaroneob,oneoblat,oneoblon,oneobheight,oneobradid, &
                     mintiltdbz,maxtiltdbz,minobrangedbz,maxobrangedbz,debugmode,&
                     static_gsi_nopcp_dbz,rmesh_dbz,zmesh_dbz
-  use hybrid_ensemble_parameters,only: l_hyb_ens
   use obsmod,only: radar_no_thinning,missing_to_nopcp
   use convinfo, only: nconvtype,ctwind,cgross,icuse,ioctype
   use convthin, only: make3grids,map3grids,del3grids,use_all
   use jfunc, only: miter
   use mpimod, only: npe
   use netcdf
+
   implicit none
 
   include 'netcdf.inc'
@@ -96,40 +92,37 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   integer(i_kind) ,intent(in   ) :: lunout
   integer(i_kind) ,intent(inout) :: nread,ndata,nodata
   real(r_kind),dimension(nlat,nlon,nsig),intent(in):: hgtl_full
-  integer(i_kind),dimension(npe) ,intent(inout) :: nobs
+  integer(i_kind) ,dimension(npe),intent(inout) :: nobs
 
 ! Declare local parameters
   real(r_kind),parameter:: r6 = 6.0_r_kind
   real(r_kind),parameter:: r360=360.0_r_kind
-  integer(i_kind),parameter:: maxdat=20_i_kind, ione = 1_i_kind         ! Used in generating cdata array
-  character(len=4), parameter :: radid = 'XXXX'
+  integer(i_kind),parameter:: maxdat=18_i_kind, ione = 1_i_kind         ! Used in generating cdata array
+  character(len=4), parameter :: radid = 'MRMS'
   
-! === Grid dbz data declaration
+!-----------------------
+!  NETCDF File Varaibles
+!-----------------------
 
-  real, allocatable, dimension(:)       :: data_r_1d, dbz_err, utime
-  real, allocatable, dimension(:,:,:)     :: data_r_3d, dbzQC, height
-  real, allocatable, dimension(:,:)     :: lon, lat
+  real(r_kind), allocatable, dimension(:)  :: dbzQC, dbz_err, height,&
+                                              lon, lat, utime
 
-  integer(i_kind), parameter                  :: max_num_vars = 50, max_num_dims = 20
-
-  integer(i_kind)                             ::  length, rcode, cdfid, ncid,var_id
-  character( len = 20 ),dimension(max_num_vars) ::  var_list
-  character( len = 99 ),dimension(50)           ::  message
-  integer(i_kind), dimension(max_num_vars)              ::  id_var, ndims, istart
-  integer(i_kind), dimension(max_num_dims)              ::  dimids, one_read
-  integer(i_kind)                                       ::  natts, ivtype
-  integer(i_kind) , dimension(max_num_vars, max_num_dims) :: dims
-  
-  logical                                       :: if_input_exist
-  integer(i_kind)                               ::  ivar, var_num, sec70
-  integer(i_kind),parameter:: izero=0_i_kind
-
+!------------------
+!  NETCDF-RELATED
+!------------------
+  INTEGER(i_kind)   :: ncdfID, status
+  INTEGER(i_kind)   :: varID, dimid
+  logical           :: if_input_exist
+  integer(i_kind)   :: ivar, sec70, length, nn
 
 !--Counters for diagnostics
  integer(i_kind) :: num_missing=izero,num_nopcp=izero, &      !counts 
                     numbadtime=izero, &    
                     num_m2nopcp=izero, &
-                    num_noise=izero,num_limmax=izero     
+                    num_noise=izero,&
+                    num_limmax=izero, &
+                    num_halo=izero, &
+                    num_gthalo=izero    
  integer(i_kind)   num_dbz2mindbz,imissing2nopcp
   
 
@@ -141,7 +134,6 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   integer(i_kind) ntmp,iout,iiout,ntdrvr_thin2
   real(r_kind) crit1,timedif
   real(r_kind),parameter:: r16000 = 16000.0_r_kind
-
   logical :: luse
   integer(i_kind) maxout,maxdata
   integer(i_kind),allocatable,dimension(:):: isort
@@ -149,21 +141,15 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   !--General declarations
   integer(i_kind) :: ierror,i,j,k,v,na,nb,nelv,nvol, &
                      ikx,mins_an,mins_ob
-  integer(i_kind) :: maxobs,nchanl,ilat,ilon,scount
+  integer(i_kind) :: maxobs,nchanl,ilat,ilon
   
   real(r_kind) :: thistiltr,selev0,celev0,thisrange,this_stahgt,thishgt                           
   real(r_kind) :: celev,selev,thisazimuthr,t4dv, &
                   dlat,dlon,thiserr,thislon,thislat, &
-                  timeb
-  real(r_kind) :: radartwindow
+                  timeb, twindm
   real(r_kind) :: rmins_an,rmins_ob                                                     
   real(r_kind),allocatable,dimension(:,:):: cdata_all
   real(r_double) rstation_id
-  
-  character(8) cstaid
-  character(4) this_staid
-  equivalence (this_staid,cstaid)
-  equivalence (cstaid,rstation_id)
 
   logical      :: outside
     
@@ -171,8 +157,9 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 
   logical         :: nopcp=.true.                ! Set observations less than dbznoise = dbznoise ('no precip obs') 
                                                  ! (See Aksoy et al. 2009, MWR)
-  real(r_kind)    :: dbznoise=5_r_kind           ! dBZ obs must be >= dbznoise for assimilation
-  logical         :: l_limmax=.true.             ! If true, observations > 60 dBZ are limited to be 60 dBZ.  This is
+  real(r_kind)    :: dbznoise=0_r_kind           ! dBZ obs must be >= dbznoise for assimilation
+  real(r_kind)    :: dbzhalo=0.001_r_kind           ! Reflectivity > than dbznoise and < dbzhalo that are NOT to be assimilated. Create Halo effect
+  logical         :: l_limmax=.true.             ! If true, observations > 70 dBZ are limited to be 70 dBZ.  This is
                                                  ! due to representativeness error associated with the model
 
   minobrange=minobrangedbz
@@ -190,25 +177,26 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   write(6,*)'think in read_dbz static_gsi_nopcp_dbz is ', static_gsi_nopcp_dbz
   !-Check if reflectivity is in the convinfo file and extract necessary attributes 
 
- ithin=1 !number of obs to keep per grid box
+ ithin=1 !number of obs to keep per grid box default: no thinning (-1)
  if(radar_no_thinning) then
- ithin=-1
+  ithin=-1
+  write(6,*) '*** NO REFLECTIVITY THINNING ***'
  endif
 
-  scount=izero
+
   ikx=izero
   do i=ione,nconvtype
      if(trim(obstype) == trim(ioctype(i)) .and. abs(icuse(i))== ione) then
         ikx=i 
-        radartwindow=ctwind(ikx)*r60         !Time window units converted to minutes 
+        !radartwindow=ctwind(ikx)*r60         !Time window units converted to minutes 
                                              !  (default setting for dbz within convinfo is 0.05 hours)
         exit                                 !Exit loop when finished with initial convinfo fields     
      else if ( i==nconvtype ) then
         write(6,*) 'READ_dBZ: ERROR - OBSERVATION TYPE IS NOT PRESENT IN CONVINFO OR USE FLAG IS ZERO'
-        write(6,*) 'READ_dBZ: ABORTTING read_dbz.f90 - NO REFLECTIVITY OBS READ!'
+        write(6,*) 'READ_dBZ: ABORTING read_dbz.f90 - NO REFLECTIVITY OBS READ!'
         return
      endif
-  end do     
+  end do    
 
   if (minobrange >= maxobrange) then
   write(6,*) 'MININMUM OB RANGE >= MAXIMUM OB RANGE FOR READING dBZ - PROGRAM STOPPING FROM READ_DBZ.F90'
@@ -220,7 +208,7 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   ilon=2_i_kind
   ilat=3_i_kind
   
-  maxobs=50000000_i_kind    !value taken from read_radar.f90 
+  maxobs=5000000_i_kind    !value taken from read_radar.f90 
 
   !--Allocate cdata_all array
    allocate(cdata_all(maxdat,maxobs),isort(maxobs))
@@ -235,7 +223,7 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
    icntpnt=0
    zflag=0
 
-   use_all=.true.
+  use_all=.true.
   if (ithin > 0) then
      write(6,*)'READ_RADAR_DBZ: ithin,rmesh :',ithin,rmesh
      use_all=.false.
@@ -258,73 +246,161 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
   endif
 !!end modified for thinning
 
-  var_list(1:4) = (/ "reflectivity", "height", "longitude", "latitude"/)
-  var_num       = 4
-
-  print *, "read_Dbz.f90: open ",trim(infile)       
+  ! CHECK IF DATA FILE EXISTS
   length     = len_trim(infile)
-
   inquire(file=infile(1:length), exist=if_input_exist)
+  fileopen: if (if_input_exist) then
 
-  
- fileopen: if (if_input_exist) then         
-    allocate( dbzQC(nlon,nlat,nsig),  height(nlat,nlon,nsig), &
-               lon(nlon,nlat),    lat(nlon,nlat) )
+  ! OPEN NETCDF FILE
+  status = nf90_open(TRIM(infile), NF90_NOWRITE, ncdfID)
+  print*, '*** OPENING MRMS Reflectivity  OBS NETCDF FILE: ', infile, status
 
-    dbzQC = 0.0_r_kind
-    height = hgtl_full
-    rcode = nf90_open("wrf_inout", NF90_WRITE, ncid)
+  ! Get dimension information
+  status = nf90_inq_dimid(ncdfID, "index", dimid)
+  status = nf90_inquire_dimension(ncdfID, dimid, len = nn)
 
-    rcode = nf90_inq_varid(ncid, 'XLONG', var_id)
-    rcode = nf90_get_var(ncid, var_id, lon, start = (/ 1, 1, 1/))
+  print*, 'NUM OBS: ', nn
 
-    rcode = nf90_inq_varid(ncid, 'XLAT', var_id)
-    rcode = nf90_get_var(ncid, var_id, lat, start = (/ 1, 1, 1/)) 
+  ALLOCATE( lat( nn ) )
+  ALLOCATE( lon( nn ) )
+  ALLOCATE( height( nn ) )
+  ALLOCATE( dbzQC( nn ) )
+  ALLOCATE( dbz_err( nn ) )
+  ALLOCATE( utime( nn ) )
 
-    rcode = NF90_close(ncid)
+   !------------------------
+   ! Get useful data arrays
+   !-------------------------
+   ! LAT
+   status = nf90_inq_varid( ncdfID, 'lat', varID )
+   status = nf90_get_var( ncdfID, varID, lat )
+
+   ! LON
+   status = nf90_inq_varid( ncdfID, 'lon', varID )
+   status = nf90_get_var( ncdfID, varID, lon )
+
+   ! HEIGHT (m) 
+   status = nf90_inq_varid( ncdfID, 'height', varID )
+   status = nf90_get_var( ncdfID, varID, height )
+
+   ! VR VALUE (m / s)
+   status = nf90_inq_varid( ncdfID, 'value', varID )
+   status = nf90_get_var( ncdfID, varID, dbzQC )
+
+   ! VR OBSERVATION ERROR
+   status = nf90_inq_varid( ncdfID, 'error_var', varID )
+   status = nf90_get_var( ncdfID, varID, dbz_err )
+
+   ! TIME
+   status = nf90_inq_varid( ncdfID, 'utime', varID )
+   status = nf90_get_var( ncdfID, varID, utime )
+
+   ! CLOSE NETCDF FILE
+   status = nf90_close( ncdfID )
+
+
   !-Obtain analysis time in minutes since reference date
 
   sec70 = 252460800  ! seconds since from 01/01/1970
 
-
-  call w3fs21(iadate,mins_an)  !mins_an -integer number of mins snce 01/01/1978
+  call w3fs21(iadatemn,mins_an)  !mins_an -integer number of mins snce 01/01/1978
   rmins_an=mins_an             !convert to real number
+
+  twindm = twind*60.0 !Convert namelist timewindow to minutes from hours
  
-  ivar = 1
+  ivar = 2
   
-  print*,"OK",lon(1,1)
-  do i = 1, nlat
-  do j = 1, nlon
-  do k = 1, nsig
+  do i = 1, nn
 
-       thishgt = height(i,j,k) ! unit : meter
+       rmins_ob = ( utime(i) - sec70 )/60
+
+       timeb = rmins_ob-rmins_an
+
+       if(abs(timeb) > abs(twindm)) then
+         numbadtime=numbadtime+ione
+         cycle
+       end if
+
+       
+       imissing2nopcp = 0
+       if( dbzQC(i) >= 999.0_r_kind ) then
+          !--Extend no precip observations to missing data fields?
+          !  May help suppress spurious convection if a problem.
+          if (missing_to_nopcp) then
+            imissing2nopcp = 1
+            dbzQC(i)     = 0.0
+            num_m2nopcp    = num_m2nopcp + ione
+          else
+            num_missing    = num_missing + ione
+            cycle!
+          end if
+       end if
+
+       imissing2nopcp = 0
+       if(miter .ne. 0 ) then ! For gsi 3DVar run
+         if (l_limmax) then
+           if ( dbzQC(i) > 70_r_kind ) then
+             dbzQC(i) = 70_r_kind
+             num_limmax = num_limmax + ione
+           end if
+         end if
+       end if
+    
+       if ( dbzQC(i) < static_gsi_nopcp_dbz ) then
+         dbzQC(i)     = static_gsi_nopcp_dbz
+         num_dbz2mindbz = num_dbz2mindbz + 1
+       end if
+
+       imissing2nopcp = 0
+       !-Special treatment for no-precip obs?
+       if( miter .eq. 0 ) then
+         if ( dbzQC(i) < dbznoise ) then
+           if ( nopcp ) then
+             dbzQC(i) = 0.0
+             num_nopcp = num_nopcp + ione
+           else
+             num_noise = num_noise + ione
+             cycle
+           end if
+         end if
+       else if ( dbzQC(i) <= dbznoise ) then ! === for 3dvar no precip obs are defined as -30 dbz
+         dbzQC(i) = static_gsi_nopcp_dbz
+       end if
+
+       ! Halo effect: Do not assimilate obs > dbznoise and obs < dbzhalo   
+       if ( dbzQC(i) > dbznoise .and. dbzQC(i) < dbzhalo ) then
+          num_halo = num_halo + ione
+          cycle
+       end if
+       if ( dbzQC(i) >= dbzhalo ) then
+          num_gthalo = num_gthalo + ione
+          !print*, dbzQC(i)
+       end if
+
+       thishgt = height(i) ! unit : meter
        hgt     = thishgt
-
-
-       thislon = lon(j,i)
-       thislat = lat(j,i)
+       thislon = lon(i)
+       thislat = lat(i)
   
        !-Check format of longitude and correct if necessary
-                 
        if(thislon>=r360) thislon=thislon-r360
        if(thislon<zero ) thislon=thislon+r360
                  
-       !-Convert back to radians                 
-         
+       !-Convert back to radians                         
        thislat = thislat*deg2rad
        thislon = thislon*deg2rad
                  
        !find grid relative lat lon locations of earth lat lon
                  
        call tll2xy(thislon,thislat,dlon,dlat,outside)
-
        if (outside) cycle
           
                                            !If observation is outside the domain
                                            ! then cycle, but don't increase range right away.
                                            ! Domain could be rectangular, so ob may be out of
                                            ! range at one end, but not the other.		     					                   		   		   
-       thiserr = dbznoise
+
+       thiserr = sqrt(dbz_err(i))    !CONVERT INPUT VARIANCE TO ERROR
                 
 
        nread = nread + ione
@@ -395,13 +471,13 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
            !!end modified for thinning
 
             thisazimuthr=0.0_r_kind
-            this_staid=radid                !Via equivalence in declaration, value is propagated
+            
                                                               !  to rstation_id used below.
             cdata_all(1,iout) = thiserr                       ! reflectivity obs error (dB) - inflated/adjusted
             cdata_all(2,iout) = dlon                          ! grid relative longitude
             cdata_all(3,iout) = dlat                          ! grid relative latitude
             cdata_all(4,iout) = thishgt                       ! obs absolute height (m)
-            cdata_all(5,iout) = dbzQC(i,j,k)                      ! radar reflectivity factor 
+            cdata_all(5,iout) = dbzQC(i)                      ! radar reflectivity factor 
             cdata_all(6,iout) = thisazimuthr                  ! 90deg-azimuth angle (radians)
             cdata_all(7,iout) = timeb*r60inv                  ! obs time (analyis relative hour)
             cdata_all(8,iout) = ikx                           ! type		   
@@ -416,14 +492,12 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
             cdata_all(17,iout)= dbznoise                      ! noise threshold for reflectivity (dBZ)
             cdata_all(18,iout)= imissing2nopcp                !=0, normal 
                                                               !=1,  !values !converted !from !missing !values 
-
+ 
             cdata_all(19,iout)= hloc
             cdata_all(20,iout)= vloc
 
             if(doradaroneob .and. (cdata_all(5,iout) .gt. -99) )goto 987
 
-     end do    ! i
-     end do    ! j
      end do    ! k
 
   987 continue      
@@ -434,26 +508,29 @@ subroutine read_dbz_nc(nread,ndata,nodata,infile,lunout,obstype,twind,sis,hgtl_f
 !---all looping done now print diagnostic output
 
   write(6,*)'READ_dBZ: Reached eof on radar reflectivity file'
-  write(6,*)'READ_dBZ: # volumes in input file             =',nvol
+  !write(6,*)'READ_dBZ: # volumes in input file             =',nvol
   write(6,*)'READ_dBZ: # read in obs. number               =',nread
-  write(6,*)'READ_dBZ: # elevations outside time window    =',numbadtime
+  write(6,*)'READ_dBZ: # observations outside time window  =',numbadtime
   write(6,*)'READ_dBZ: # of noise obs to no precip obs     =',num_nopcp
   write(6,*)'READ_dBZ: # of missing data to no precip obs  =',num_m2nopcp
   write(6,*)'READ_dBZ: # of rejected noise obs             =',num_noise
   write(6,*)'READ_dBZ: # of missing data                   =',num_missing
-  write(6,*)'READ_dBZ: # changed to min dbz             =',num_dbz2mindbz
-  write(6,*)'READ_dBZ: # restricted to 60dBZ limit         =',num_limmax
+  write(6,*)'READ_dBZ: # of obs removed for halo           =',num_halo
+  write(6,*)'READ_dBZ: # of kept obs > halo value          =',num_gthalo
+  write(6,*)'READ_dBZ: # changed to min dbz                =',num_dbz2mindbz
+  write(6,*)'READ_dBZ: # restricted to 70dBZ limit         =',num_limmax
 
 !---Write observation to scratch file---!
-  
-  call count_obs(ndata,maxdat,ilat,ilon,cdata_all,nobs)
+!print*, 'CALL COUNT DBZ', ndata,maxdat,ilat,ilon,nobs
+  call count_obs(ndata,maxdat,ilat,ilon,cdata_all,nobs) 
   write(lunout) obstype,sis,maxdat,nchanl,ilat,ilon
   write(lunout) ((cdata_all(k,i),k=ione,maxdat),i=ione,ndata)
- 
+  write(6,*) 'FINISH READ DBZ'
   
   !---------------DEALLOCATE ARRAYS-------------!
- 
   deallocate(cdata_all)
+  deallocate(lat, lon, height, dbzQC, dbz_err,utime)
+
  else  !fileopen
   write(6,*) 'READ_dBZ: ERROR OPENING RADAR REFLECTIVITY FILE: ',trim(infile),' IOSTAT ERROR: ',ierror, ' SKIPPING...'
  end if fileopen

@@ -1,6 +1,6 @@
 met_guess::
 !var     level    crtm_use    desc              orig_name
- ps        1      -1         surface_pressure     ps
+  ps        1      -1         surface_pressure     ps
   z         1      -1         geopotential_height  phis
   u        50       2         zonal_wind           u
   v        50       2         meridional_wind      v
@@ -10,16 +10,17 @@ met_guess::
   tv       50       2         virtual_temperature  tv
   q        50       2         specific_humidity    sphu
   oz       50       2         ozone                ozone
-  ql       50      10         cloud_condensate  QCLOUD
-  qr       50      10         rain              QRAIN
-  qs       50      10         snow              QSNOW
-  qi       50      10         ice               QICE
-  qg       50      10         graupel           QGRAUP
-  qnr      50      10         rain number       QNRAIN
-  qni      50      10         ice number        QNICE
-  qnc      50      10         cloud number      QNCLOUD
-  dbz      50      10         reflectivity      REFL_10CM
-  mask     50      -1         innovation        REFL_10CM
+  ql       50      10         cloud_condensate     QCLOUD
+  qr       50      10         rain                 QRAIN
+  qs       50      10         snow                 QSNOW
+  qi       50      10         ice                  QICE
+  qg       50      10         graupel              QGRAUP
+  qh       50      10         hail                 QHAIL
+  qnr      50      10         rain number          QNRAIN
+  qni      50      10         ice number           QNICE
+  qnc      50      10         cloud number         QNCLOUD
+  dbz      50      10         reflectivity         REFL_10CM
+  mask     50      -1         innovation           REFL_10CM
 ::
 
 !  div      50      -1         zonal_wind           div
@@ -47,11 +48,11 @@ state_tendencies::
  prse 51      met_guess
 ::
 
-state_vector::  
+state_vector::
 !var     level  itracer amedge  source     funcof
  u        50      0      no     met_guess    u
  v        50      0      no     met_guess    v
- w        50      0      no     met_guess    w 
+ w        50      0      no     met_guess    w
  tv       50      0      no     met_guess    tv
  tsen     50      0      no     met_guess    tv,q
  q        50      1      no     met_guess    q
@@ -60,27 +61,29 @@ state_vector::
  qs       50      1      no     met_guess    qs
  qi       50      1      no     met_guess    qi
  qg       50      1      no     met_guess    qg
- qnr       50      1      no     met_guess    qnr
- qni       50      1      no     met_guess    qni
- dbz       50      1      no     met_guess   dbz 
- prse      51      0      yes    met_guess    prse
- ps        1      0      no     met_guess    p3d
+ qh       50      1      no     met_guess    qh
+ qnr      50      1      no     met_guess    qnr
+ qni      50      1      no     met_guess    qni
+ dbz      50      1      no     met_guess    dbz
+ prse     51      0      yes    met_guess    prse
+ ps       1       0      no     met_guess    p3d
 ::
 
 control_vector::
 !var     level  itracer as/tsfc_sdv  an_amp0   source  funcof
- u       50      0        1.0        -1.0     state    u,v
- v       50      0        1.0        -1.0     state    u,v
- ps        1      0       1.0        -1.0     state    p3d
+ u        50      0       1.0        -1.0     state    u,v
+ v        50      0       1.0        -1.0     state    u,v
+ ps       1       0       1.0        -1.0     state    p3d
  t        50      0       1.0        -1.0     state    tv
  q        50      1       1.0        -1.0     state    q
- w        50      0       1.0        -1.0     state     w 
- dbz      50      1       1.0        -1.0     state   dbz 
+ w        50      0       1.0        -1.0     state    w
+ dbz      50      1       1.0        -1.0     state    dbz
  qr       50      1       1.0        -1.0     state    qr
  qs       50      1       1.0        -1.0     state    qs
  qi       50      1       1.0        -1.0     state    qi
  qg       50      1       1.0        -1.0     state    qg
+ qh       50      1       1.0        -1.0     state    qg
  ql       50      1       1.0        -1.0     state    qc
- qni       50      1      1.0        -1.0     state    qni
- qnr       50      1      1.0        -1.0     state    qnr
+ qni      50      1       1.0        -1.0     state    qni
+ qnr      50      1       1.0        -1.0     state    qnr
 ::

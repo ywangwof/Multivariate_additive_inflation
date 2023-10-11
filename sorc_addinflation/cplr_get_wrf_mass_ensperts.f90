@@ -54,7 +54,7 @@ contains
       use guess_grids,   only: ntguessig,ifilesig
       use gsi_4dvar,     only: nhr_assimilation
       use get_arw_ensmod_mod,  only: get_arw_ensmod_class
-      use general_sub2grid_mod, only: general_sub2grid_destroy_info
+      use general_sub2grid_mod, only: general_sub2grid_destroy_info,sub2grid_info
   
       implicit none
       class(get_wrf_mass_ensperts_class), intent(inout) :: this

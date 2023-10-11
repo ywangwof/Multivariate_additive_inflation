@@ -28,25 +28,26 @@
 ! output:
 
 
-use    netcdf
+    use    netcdf
 
-implicit none
-character(len=256), parameter :: source   = &
+    implicit none
+
+    character(len=256), parameter :: source   = &
    "$URL: https://proxy.subversion.ucar.edu/DAReS/DART/trunk/models/wrf/WRF_DART_utilities/add_pert_where_high_refl.f90 $"
-character(len=32 ), parameter :: revision = "$Revision: 6256 $"
-character(len=128), parameter :: revdate  = "$Date: 2013-06-12 11:19:10 -0500 (Wed, 12 Jun 2013) $"
-     
-     integer, parameter :: r8 = SELECTED_REAL_KIND(12)   ! real r8
-     real(r8), PARAMETER :: gravity        = 9.81_r8   ! wikipedia has 9.80665
-      real(r8), PARAMETER :: t_kelvin       = 273.15_r8
-      real(r8), PARAMETER :: ps0            = 100000.0_r8    ! Base sea level pressureo  
-     real(r8), PARAMETER :: gas_constant_v = 461.6_r8
+    character(len=32 ), parameter :: revision = "$Revision: 6256 $"
+    character(len=128), parameter :: revdate  = "$Date: 2013-06-12 11:19:10 -0500 (Wed, 12 Jun 2013) $"
+
+    integer, parameter :: r8 = SELECTED_REAL_KIND(12)   ! real r8
+    real(r8), PARAMETER :: gravity        = 9.81_r8   ! wikipedia has 9.80665
+    real(r8), PARAMETER :: t_kelvin       = 273.15_r8
+    real(r8), PARAMETER :: ps0            = 100000.0_r8    ! Base sea level pressureo
+    real(r8), PARAMETER :: gas_constant_v = 461.6_r8
     real(r8), PARAMETER :: gas_constant   = 287.0_r8 ! wikipedia has 287.06,
-    real(r8), PARAMETER :: thr_value   = 90 ! grids with w > tha_value were the masked points 
+    real(r8), PARAMETER :: thr_value   = 90 ! grids with w > tha_value were the masked points
                                                      ! WRF has 287.05 ...
 
     integer iseed
-    common /rn01/iseed 
+    common /rn01/iseed
 
 ! command-line parameters
 character(len=129) :: w_mask_file
@@ -59,11 +60,11 @@ real(r8)           :: w_sd
 real(r8)           :: t_sd
 real(r8)           :: td_sd
 real(r8)           :: qv_sd
-real           :: gasdev 
+real           :: gasdev
 
 ! local variables
-real(r8), allocatable :: w_mask(:,:,:)              ! masking from w 
-real(r8), allocatable :: w_mask1(:,:,:)              ! masking from w 
+real(r8), allocatable :: w_mask(:,:,:)              ! masking from w
+real(r8), allocatable :: w_mask1(:,:,:)              ! masking from w
 
 real(r8), allocatable :: phb(:,:,:)             ! base-state geopotential (m^2 s^-2)
 real(r8), allocatable :: ht(:,:,:)              ! height MSL of mass grid points (m)
@@ -111,8 +112,8 @@ character(len=120) :: string
 
 w_mask_file="gsi_wrf_inout.masker"
 wrf_file="wrfinput_d01"
- write(6,*)'thinkeb xx'
- call flush(6)
+!write(6,*)'thinkeb xx'
+call flush(6)
 call getarg(1,string)
     read(string,*) iseed
 call getarg(2,string)
@@ -122,7 +123,7 @@ call getarg(3,string)
 call getarg(4,string)
     read(string,*) u_sd
 
-write(6,*)'u_sd is issed',u_sd,' ',iseed
+!write(6,*)'u_sd is issed = ',u_sd,', iseed = ',iseed
 
 ! Read locations where high reflectivity was observed.
 
@@ -130,10 +131,6 @@ write(6,*)'u_sd is issed',u_sd,' ',iseed
 
 
 ! now allocate storage and read the observations
-
-
-
-
 
 call check ( nf90_open(wrf_file, NF90_WRITE, ncid) )
 
@@ -149,7 +146,6 @@ call check ( nf90_inquire_dimension(ncid, var_id, varname, we) )
 call check( nf90_get_att(ncid, nf90_global, 'DX', dx) )
 call check( nf90_get_att(ncid, nf90_global, 'DY', dy) )
 
-
 ! Read WRF base-state geopotential height field and compute height (m MSL)
 ! of each grid point.
 
@@ -159,16 +155,6 @@ allocate(ht_u(we+1,sn,bt))
 allocate(ht_v(we,sn+1,bt))
 allocate(ht_w(we,sn,bt+1))
 
-! Open WRF masking  file and qr used as masking, it has the same size as the wrf .
-  allocate(w_mask(we,sn,bt))
-  call check ( nf90_open(w_mask_file, NF90_WRITE, ncid2) )
-  call check ( nf90_inq_varid(ncid2, 'QRAIN', var_id2))
-  call check ( nf90_get_var(ncid2, var_id2, w_mask, start = (/ 1, 1, 1, 1/)))
-
-  where( w_mask < 0.0 )
-    w_mask = w_mask * -1.0
-  endwhere
-
 ! Open WRF file and obtain miscellaneous values.
 
 call check ( nf90_inq_varid(ncid, 'PHB', var_id))
@@ -177,14 +163,14 @@ call check ( nf90_get_var(ncid, var_id, phb, start = (/ 1, 1, 1, 1/)))
 do k=1, bt
   do j=1, sn
     do i=1, we
-      ht(i,j,k) = ( phb(i,j,k) + phb(i,j,k+1) ) / (2.0*gravity)
+        ht(i,j,k) = ( phb(i,j,k) + phb(i,j,k+1) ) / (2.0*gravity)
     enddo
   enddo
 enddo
 do k=1, bt
   do j=1, sn
     do i=2, we
-      ht_u(i,j,k) = ( phb(i-1,j,k) + phb(i-1,j,k+1) + phb(i,j,k) + phb(i,j,k+1) ) / (4.0*gravity)
+        ht_u(i,j,k) = ( phb(i-1,j,k) + phb(i-1,j,k+1) + phb(i,j,k) + phb(i,j,k+1) ) / (4.0*gravity)
     enddo
     ht_u(1,j,k) = ht_u(2,j,k)
     ht_u(we+1,j,k) = ht_u(we,j,k)
@@ -193,7 +179,7 @@ enddo
 do k=1, bt
   do i=1, we
     do j=2, sn
-      ht_v(i,j,k) = ( phb(i,j-1,k) + phb(i,j-1,k+1) + phb(i,j,k) + phb(i,j,k+1) ) / (4.0*gravity)
+        ht_v(i,j,k) = ( phb(i,j-1,k) + phb(i,j-1,k+1) + phb(i,j,k) + phb(i,j,k+1) ) / (4.0*gravity)
     enddo
     ht_v(i,1,k) = ht_v(i,2,k)
     ht_v(i,sn+1,k) = ht_v(i,sn,k)
@@ -202,10 +188,20 @@ enddo
 do k=1, bt+1
   do j=1, sn
     do i=1, we
-      ht_w(i,j,k) = phb(i,j,k) / gravity
+        ht_w(i,j,k) = phb(i,j,k) / gravity
     enddo
   enddo
 enddo
+
+! Open WRF masking  file and qr used as masking, it has the same size as the wrf .
+allocate(w_mask(we,sn,bt))
+call check ( nf90_open(w_mask_file, NF90_WRITE, ncid2) )
+call check ( nf90_inq_varid(ncid2, 'QRAIN', var_id2))
+call check ( nf90_get_var(ncid2, var_id2, w_mask, start = (/ 1, 1, 1, 1/)))
+
+where( w_mask < 0.0 )
+  w_mask = w_mask * -1.0
+endwhere
 
 
 ! Initialize random number generator with a seed based on the milliseconds
@@ -214,33 +210,34 @@ enddo
 ! Old non-repeatable random sequence
 !call date_and_time(crdate,crtime,crzone,values)
 !call init_random_seq(rs, -int(values(8)))
- 
+
 ! Add perturbations.
 
 if (u_sd .gt. 0.0) then
- write(6,*)'think u_sd= ',u_sd
-  allocate(f(we,sn,bt))
-  call check ( nf90_inq_varid(ncid, 'QGRAUP', var_id))
-  call check ( nf90_get_var(ncid, var_id, f, start = (/ 1, 1, 1, 1/)))
-  allocate(sd(we,sn,bt))  
+    !write(6,*)'think u_sd= ',u_sd
+    allocate(f(we,sn,bt))
+    call check ( nf90_inq_varid(ncid, 'QGRAUP', var_id))
+    call check ( nf90_get_var(ncid, var_id, f, start = (/ 1, 1, 1, 1/)))
 
-  sd(:,:,:) = 0.0
-  do k=1,bt
-  do j=1,sn
-   do i=1,we
-   if(w_mask(i,j,k).gt.thr_value) then
-    write(6,*)'think2 w_mask is ',w_mask(i,j,k)
-    sd(i,j,k) = u_sd
-   endif
-  enddo
-  enddo
-  enddo
+    allocate(sd(we,sn,bt))
+    sd(:,:,:) = 0.0
+    do k=1,bt
+    do j=1,sn
+     do i=1,we
+        if(w_mask(i,j,k).gt.thr_value) then
+            !write(6,*)'think2 w_mask is ',w_mask(i,j,k)
+            sd(i,j,k) = u_sd
+        endif
+    enddo
+    enddo
+    enddo
 
-  call add_smooth_perturbations(f, sd, we, sn, bt, lh, lv, dx, dy, ht,10.0)
+    call add_smooth_perturbations(f, sd, we, sn, bt, lh, lv, dx, dy, ht,10.0)
 
-  call check ( nf90_put_var(ncid, var_id, f, start = (/ 1, 1, 1, 1/)))
-  deallocate(f)
-  deallocate(sd)
+    !write(*,*) 'Writing QGRAUP ...'
+    call check ( nf90_put_var(ncid, var_id, f, start = (/ 1, 1, 1, 1/)))
+    deallocate(f)
+    deallocate(sd)
 
 end if
 
@@ -255,20 +252,18 @@ deallocate(ht_u)
 deallocate(ht_v)
 deallocate(ht_w)
 
-
-
 contains
 
 
-  ! Internal subroutine - checks error status after each netcdf, prints 
-  !                       text message each time an error code is returned. 
+  ! Internal subroutine - checks error status after each netcdf, prints
+  !                       text message each time an error code is returned.
   subroutine check(istatus)
-    integer, intent ( in) :: istatus 
+    integer, intent ( in) :: istatus
     if(istatus /= nf90_noerr) STOP
   end subroutine check
 
 !------------------------------------------------------------------------------------
-  
+
   ! Compute dewpoint (in Kelvin) from the specified values of pressure and water vapor mixing ratio.
   ! Author:  David Dowell
   ! Date:  July 9, 2007
@@ -302,7 +297,7 @@ contains
   end subroutine compute_td
 
 !------------------------------------------------------------------------------------
-  
+
   ! Compute water vapor mixing ratio (in kg/kg) from the specified values of pressure and dewpoint.
   ! Author:  David Dowell
   ! Date:  July 9, 2007
@@ -339,7 +334,7 @@ contains
   subroutine add_smooth_perturbations(f, sd, nx, ny, nz, lh, lv, dx, dy,ht,thre)
     implicit none
     integer iseed
-    common /rn01/iseed 
+    common /rn01/iseed
 !-- passed parameters
     integer, intent(in) :: nx, ny, nz        ! grid dimensions
     real(r8), intent(in) :: lh, lv           ! horizontal and vertical length scales (m)
@@ -358,7 +353,7 @@ contains
     integer :: i1, i2, j1, j2, k1, k2        ! more grid indices
     real(r8) :: rlh, rlv                     ! reciprocals of lh and lv
     integer, parameter :: nl = 5             ! number of length scales for computing exponential weight
-     real :: gasdev
+    real :: gasdev
 
 
     rlh = 1.0 / lh
@@ -421,9 +416,9 @@ contains
 
   end subroutine add_smooth_perturbations
 
-
 END PROGRAM add_pert_where_high_refl
-  FUNCTION GASDEV(IDUM)
+
+FUNCTION GASDEV(IDUM)
 !
 !-----------------------------------------------------------------------
 !
@@ -433,7 +428,7 @@ END PROGRAM add_pert_where_high_refl
 !  a negative integer iseed.
 !
 !  Added by M.Tong
-!  Reference: Numerical Recipes          
+!  Reference: Numerical Recipes
 !
 !-----------------------------------------------------------------------
 !
@@ -495,7 +490,10 @@ END PROGRAM add_pert_where_high_refl
   ENDIF
 
   RETURN
-  END FUNCTION GASDEV
+END FUNCTION GASDEV
+!
+!##################################################################
+!##################################################################
 !######                  FUNCTION RAN1                       ######
 !######                                                      ######
 !######                     Developed by                     ######
